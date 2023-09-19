@@ -20,10 +20,12 @@ public:
 class StateMachine
 {
   int curStateIdx = 0;
-  std::vector<State*> states;
+  std::vector<StateMachine*> stateMachineStates;
   std::vector<std::vector<std::pair<StateTransition*, int>>> transitions;
+  State *leafState = nullptr;
 public:
   StateMachine() = default;
+  StateMachine(State *st) : leafState(st) {};
   StateMachine(const StateMachine &sm) = default;
   StateMachine(StateMachine &&sm) = default;
 
@@ -31,11 +33,13 @@ public:
 
   StateMachine &operator=(const StateMachine &sm) = default;
   StateMachine &operator=(StateMachine &&sm) = default;
-
-
+  
+  void enter();
+  void exit() const;
   void act(float dt, flecs::world &ecs, flecs::entity entity);
 
   int addState(State *st);
+  int addStateFromStateMachine(StateMachine *sm);
   void addTransition(StateTransition *trans, int from, int to);
 };
 
