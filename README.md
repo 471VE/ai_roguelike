@@ -1,3 +1,5 @@
+# NOTE: flecs dymanic library should be copied into root directory!
+
 Learning materials for the course "AI for videogames" based on simple roguelike mechanics.
 * w1 - FSM
 * w2 - Behaviour Trees + blackboard

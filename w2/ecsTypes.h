@@ -112,3 +112,19 @@ struct Team
 
 struct TextureSource {};
 
+struct IsBuff {};
+
+struct CanGetBuffed {};
+
+#include <vector>
+struct WayPoints
+{
+  std::vector<Position> positions;
+};
+
+#include "raylib.h"
+struct Expression
+{
+  const char* expression = nullptr;
+  Color color = Color(0, 0, 0, 0);
+};

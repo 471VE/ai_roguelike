@@ -5,6 +5,11 @@
 #include "aiLibrary.h"
 #include "blackboard.h"
 
+enum Teams
+{
+  PLAYER_TEAM = 0,
+  ENEMY_TEAM = 1
+};
 
 static void create_minotaur_beh(flecs::entity e)
 {
@@ -25,7 +30,54 @@ static void create_minotaur_beh(flecs::entity e)
   e.set(BehaviourTree{root});
 }
 
-static flecs::entity create_monster(flecs::world &ecs, int x, int y, Color col, const char *texture_src)
+static void create_gatherer_beh(flecs::entity e)
+{
+  e.set(Blackboard{});
+  BehNode *root =
+    selector({
+      parallelize({
+        sequence({
+          find_enemy(e, 2.f, "attack_enemy"),
+          move_to_entity(e, "attack_enemy")
+        }),
+        say("OBLITERATE THE ENEMY!", RED)
+      }),
+      parallelize({
+        sequence({
+          find_buff(e, "get_buff"),
+          move_to_entity(e, "get_buff")
+        }),
+        say("Gotta get buffed!", WHITE)
+      }),
+      parallelize({
+        sequence({
+          find_enemy(e, FLT_MAX, "attack_enemy"),
+          move_to_entity(e, "attack_enemy")
+        }),
+        say("MAKE GENOCIDE HAPPEN!", RED)
+      }),
+      negate(say("Easter egg for those curious", WHITE)), // should be skipped by selector
+      say("Bloodlust not quite satisfied :(", WHITE)
+    });
+  e.set(BehaviourTree{root});
+}
+
+static void create_guard_beh(flecs::entity e)
+{
+  e.set(Blackboard{});
+  BehNode *root =
+    selector({
+      sequence({
+        find_enemy(e, 2.f, "attack_enemy"),
+        move_to_entity(e, "attack_enemy")
+      }),
+      move_to_next_waypoint(),
+    });
+  e.set(BehaviourTree{root});
+}
+
+static flecs::entity create_mob(flecs::world &ecs, int x, int y, Color col, const char *texture_src,
+  Teams team = Teams::ENEMY_TEAM, float melee_damage = 20.f)
 {
   flecs::entity textureSrc = ecs.entity(texture_src);
   return ecs.entity()
@@ -36,9 +88,9 @@ static flecs::entity create_monster(flecs::world &ecs, int x, int y, Color col, 
     .set(Color{col})
     .add<TextureSource>(textureSrc)
     .set(StateMachine{})
-    .set(Team{1})
+    .set(Team{(int)team})
     .set(NumActions{1, 0})
-    .set(MeleeDamage{20.f})
+    .set(MeleeDamage{melee_damage})
     .set(Blackboard{});
 }
 
@@ -52,18 +104,20 @@ static void create_player(flecs::world &ecs, int x, int y, const char *texture_s
     //.set(Color{0xee, 0xee, 0xee, 0xff})
     .set(Action{EA_NOP})
     .add<IsPlayer>()
+    .add<CanGetBuffed>()
     .set(Team{0})
     .set(PlayerInput{})
     .set(NumActions{2, 0})
     .set(Color{255, 255, 255, 255})
     .add<TextureSource>(textureSrc)
-    .set(MeleeDamage{50.f});
+    .set(MeleeDamage{60.f});
 }
 
 static void create_heal(flecs::world &ecs, int x, int y, float amount)
 {
   ecs.entity()
     .set(Position{x, y})
+    .add<IsBuff>()
     .set(HealAmount{amount})
     .set(Color{0xff, 0x44, 0x44, 0xff});
 }
@@ -72,6 +126,7 @@ static void create_powerup(flecs::world &ecs, int x, int y, float amount)
 {
   ecs.entity()
     .set(Position{x, y})
+    .add<IsBuff>()
     .set(PowerupAmount{amount})
     .set(Color{0xff, 0xff, 0x00, 0xff});
 }
@@ -122,10 +177,13 @@ void init_roguelike(flecs::world &ecs)
   register_roguelike_systems(ecs);
 
   ecs.entity("swordsman_tex")
-    .set(Texture2D{LoadTexture("assets/swordsman.png")});
+    .set(Texture2D{LoadTexture("w2/assets/swordsman.png")});
   ecs.entity("minotaur_tex")
-    .set(Texture2D{LoadTexture("assets/minotaur.png")});
-
+    .set(Texture2D{LoadTexture("w2/assets/minotaur.png")});
+  ecs.entity("gatherer_tex")
+    .set(Texture2D{LoadTexture("w2/assets/gatherer.png")});
+  ecs.entity("guard_tex")
+    .set(Texture2D{LoadTexture("w2/assets/guard.png")});
   ecs.observer<Texture2D>()
     .event(flecs::OnRemove)
     .each([](Texture2D texture)
@@ -133,10 +191,19 @@ void init_roguelike(flecs::world &ecs)
         UnloadTexture(texture);
       });
 
-  create_minotaur_beh(create_monster(ecs, 5, 5, Color{0xee, 0x00, 0xee, 0xff}, "minotaur_tex"));
-  create_minotaur_beh(create_monster(ecs, 10, -5, Color{0xee, 0x00, 0xee, 0xff}, "minotaur_tex"));
-  create_minotaur_beh(create_monster(ecs, -5, -5, Color{0x11, 0x11, 0x11, 0xff}, "minotaur_tex"));
-  create_minotaur_beh(create_monster(ecs, -5, 5, Color{0, 255, 0, 255}, "minotaur_tex"));
+  ecs.entity("expression_to_be_said").add<Expression>();
+
+  create_minotaur_beh(create_mob(ecs, 5, 5, Color{0xee, 0x00, 0xee, 0xff}, "minotaur_tex"));
+  create_minotaur_beh(create_mob(ecs, 10, -5, Color{0xee, 0x00, 0xee, 0xff}, "minotaur_tex"));
+  create_minotaur_beh(create_mob(ecs, -5, -5, Color{0x11, 0x11, 0x11, 0xff}, "minotaur_tex"));
+  create_minotaur_beh(create_mob(ecs, -5, 5, Color{0, 255, 0, 255}, "minotaur_tex"));
+
+  create_gatherer_beh(create_mob(
+    ecs, 5, -5, Color{255, 255, 255, 255}, "gatherer_tex", Teams::PLAYER_TEAM, 100.f).add<CanGetBuffed>());
+
+  ecs.entity("waypoints").set(WayPoints{{{6, 6}, {-6, 6}, {-6, -6}, {6, -6}}});
+  create_guard_beh(create_mob(ecs, 6, 7, Color{255, 255, 255, 255},"guard_tex", Teams::PLAYER_TEAM));
+
 
   create_player(ecs, 0, 0, "swordsman_tex");
 
@@ -227,12 +294,12 @@ static void process_actions(flecs::world &ecs)
     });
   });
 
-  static auto playerPickup = ecs.query<const IsPlayer, const Position, Hitpoints, MeleeDamage>();
+  static auto buffPickup = ecs.query<const CanGetBuffed, const Position, Hitpoints, MeleeDamage>();
   static auto healPickup = ecs.query<const Position, const HealAmount>();
   static auto powerupPickup = ecs.query<const Position, const PowerupAmount>();
   ecs.defer([&]
   {
-    playerPickup.each([&](const IsPlayer&, const Position &pos, Hitpoints &hp, MeleeDamage &dmg)
+    buffPickup.each([&](const CanGetBuffed&, const Position &pos, Hitpoints &hp, MeleeDamage &dmg)
     {
       healPickup.each([&](flecs::entity entity, const Position &ppos, const HealAmount &amt)
       {
@@ -286,6 +353,10 @@ void print_stats(flecs::world &ecs)
   {
     DrawText(TextFormat("hp: %d", int(hp.hitpoints)), 20, 20, 20, WHITE);
     DrawText(TextFormat("power: %d", int(dmg.damage)), 20, 40, 20, WHITE);
+  });
+  ecs.query<const Expression>().each([&](const Expression &e)
+  {
+    DrawText(e.expression, 200, 20, 20, e.color);
   });
 }
 
