@@ -11,25 +11,62 @@
 
 static flecs::entity create_player_approacher(flecs::entity e)
 {
-  e.set(DmapWeights{{{"approach_map", {1.f, 1.f}}}});
+  e.set(DmapTransform{{{"approach_map", [](flecs::entity, float value) { return value; } }}});
   return e;
 }
 
 static flecs::entity create_player_fleer(flecs::entity e)
 {
-  e.set(DmapWeights{{{"flee_map", {1.f, 1.f}}}});
+  e.set(DmapTransform{{{"flee_map", [](flecs::entity, float value) { return value; } }}});
   return e;
 }
 
 static flecs::entity create_hive_follower(flecs::entity e)
 {
-  e.set(DmapWeights{{{"hive_map", {1.f, 1.f}}}});
+  e.set(DmapTransform{{{"hive_map", [](flecs::entity, float value) { return value; } }}});
   return e;
 }
 
 static flecs::entity create_hive_monster(flecs::entity e)
 {
-  e.set(DmapWeights{{{"hive_map", {1.f, 1.f}}, {"approach_map", {1.8, 0.8f}}}});
+  e.set(DmapTransform{{
+    {"hive_map", 
+      [](flecs::entity e, float value)
+      {
+        bool low_hp = false; 
+        e.get([&](const Hitpoints &hp) {
+          if (hp.hitpoints < 70.0f) low_hp = true;
+        });
+        return value * (low_hp ? 3.0 : 1.0);
+      }
+    }, 
+    {"approach_map", 
+      [](flecs::entity, float value)
+      {
+        if (value < 1e5)
+          return powf(value * 1.8, 0.8);
+        return value;
+      }
+    }}});
+  return e;
+}
+
+static flecs::entity create_mage(flecs::entity e)
+{
+  e.set(ShootDamage{10.f});
+  e.set(DmapTransform{{
+    {"ally_map", 
+      [](flecs::entity e, float value)
+      {
+        bool low_hp = false; 
+        e.get([&](const Hitpoints &hp) {
+          if (hp.hitpoints < 70.f)
+            low_hp = true;
+        });
+        return value * (low_hp ? 10.f : 0.5f);
+      }
+    },
+    {"mage_map", [](flecs::entity, float value) { return value; } }}});
   return e;
 }
 
@@ -162,7 +199,8 @@ static void create_player(flecs::world &ecs, const char *texture_src)
     .set(NumActions{2, 0})
     .set(Color{255, 255, 255, 255})
     .add<TextureSource>(textureSrc)
-    .set(MeleeDamage{20.f});
+    .set(MeleeDamage{20.f})
+    .set(DmapTransform{{{"exploration_map", [](flecs::entity, float value) { return value; } }}});
 }
 
 static void create_heal(flecs::world &ecs, int x, int y, float amount)
@@ -208,16 +246,31 @@ static void register_roguelike_systems(flecs::world &ecs)
       if (pass && !inp.passed)
         a.action = EA_PASS;
       inp.passed = pass;
+
+      bool explore = IsKeyDown(KEY_E);
+      if (explore && !inp.explore)
+        a.action = EA_EXPLORE;
+      inp.explore = explore;
     });
-  ecs.system<const Position, const Color>()
+  ecs.system<const Position, const Color, const ExplorationStatus>()
     .term<TextureSource>(flecs::Wildcard)
     .term<BackgroundTile>()
-    .each([&](flecs::entity e, const Position &pos, const Color color)
+    .each([&](flecs::entity e, const Position &pos, const Color color, const ExplorationStatus &status)
     {
       const auto textureSrc = e.target<TextureSource>();
+      auto final_brightness = [&](unsigned char x) { 
+        float result = (float)x * (status.explored ? 1.f : 0.3f);
+        return (unsigned char)(result);
+      };
+      Color finalColor{
+        final_brightness(color.r),
+        final_brightness(color.g),
+        final_brightness(color.b),
+        color.a
+      };
       DrawTextureQuad(*textureSrc.get<Texture2D>(),
           Vector2{1, 1}, Vector2{0, 0},
-          Rectangle{float(pos.x) * tile_size, float(pos.y) * tile_size, tile_size, tile_size}, color);
+          Rectangle{float(pos.x) * tile_size, float(pos.y) * tile_size, tile_size, tile_size}, finalColor);
     });
   ecs.system<const Position, const Color>()
     .term<TextureSource>(flecs::Wildcard).not_()
@@ -254,9 +307,9 @@ static void register_roguelike_systems(flecs::world &ecs)
     {
       SetTextureFilter(tex, TEXTURE_FILTER_POINT);
     });
-  ecs.system<const DmapWeights>()
+  ecs.system<const DmapTransform>()
     .term<VisualiseMap>()
-    .each([&](const DmapWeights &wt)
+    .each([&](flecs::entity e, const DmapTransform &wt)
     {
       dungeonDataQuery.each([&](const DungeonData &dd)
       {
@@ -264,15 +317,12 @@ static void register_roguelike_systems(flecs::world &ecs)
           for (size_t x = 0; x < dd.width; ++x)
           {
             float sum = 0.f;
-            for (const auto &pair : wt.weights)
+            for (const auto &pair : wt.transform)
             {
               ecs.entity(pair.first.c_str()).get([&](const DijkstraMapData &dmap)
               {
                 float v = dmap.map[y * dd.width + x];
-                if (v < 1e5f)
-                  sum += powf(v * pair.second.mult, pair.second.pow);
-                else
-                  sum += v;
+                sum += pair.second(e, v);
               });
             }
             if (sum < 1e5f)
@@ -305,9 +355,11 @@ void init_roguelike(flecs::world &ecs)
   register_roguelike_systems(ecs);
 
   ecs.entity("swordsman_tex")
-    .set(Texture2D{LoadTexture("assets/swordsman.png")});
+    .set(Texture2D{LoadTexture("w4/assets/swordsman.png")});
   ecs.entity("minotaur_tex")
-    .set(Texture2D{LoadTexture("assets/minotaur.png")});
+    .set(Texture2D{LoadTexture("w4/assets/minotaur.png")});
+  ecs.entity("mage_tex")
+    .set(Texture2D{LoadTexture("w4/assets/mage.png")});
 
   ecs.observer<Texture2D>()
     .event(flecs::OnRemove)
@@ -321,6 +373,8 @@ void init_roguelike(flecs::world &ecs)
   create_hive_monster(create_monster(ecs, Color{0x11, 0x11, 0x11, 0xff}, "minotaur_tex"));
   create_hive(create_player_fleer(create_monster(ecs, Color{0, 255, 0, 255}, "minotaur_tex")));
 
+  create_mage(create_monster(ecs, Color{0xff, 0xff, 0xff, 0xff}, "mage_tex"));
+
   create_player(ecs, "swordsman_tex");
 
   ecs.entity("world")
@@ -331,9 +385,9 @@ void init_roguelike(flecs::world &ecs)
 void init_dungeon(flecs::world &ecs, char *tiles, size_t w, size_t h)
 {
   flecs::entity wallTex = ecs.entity("wall_tex")
-    .set(Texture2D{LoadTexture("assets/wall.png")});
+    .set(Texture2D{LoadTexture("w4/assets/wall.png")});
   flecs::entity floorTex = ecs.entity("floor_tex")
-    .set(Texture2D{LoadTexture("assets/floor.png")});
+    .set(Texture2D{LoadTexture("w4/assets/floor.png")});
 
   std::vector<char> dungeonData;
   dungeonData.resize(w * h);
@@ -354,7 +408,7 @@ void init_dungeon(flecs::world &ecs, char *tiles, size_t w, size_t h)
       if (tile == dungeon::wall)
         tileEntity.add<TextureSource>(wallTex);
       else if (tile == dungeon::floor)
-        tileEntity.add<TextureSource>(floorTex);
+        tileEntity.add<TextureSource>(floorTex).set(ExplorationStatus{false});
     }
 }
 
@@ -411,9 +465,29 @@ static void process_actions(flecs::world &ecs)
   static auto processActions = ecs.query<Action, Position, MovePos, const MeleeDamage, const Team>();
   static auto processHeals = ecs.query<Action, Hitpoints>();
   static auto checkAttacks = ecs.query<const MovePos, Hitpoints, const Team>();
+  static auto processShots = ecs.query<Action, const Position, const ShootDamage, const Team>();
+  static auto checkShots = ecs.query<Hitpoints, const Team>();
+  static auto dungeonExploration = ecs.query<const IsPlayer, const Position>();
+  static auto checkTiles = ecs.query<const BackgroundTile, const Position, ExplorationStatus>();
+  size_t dungeonWidth = 0;
+  ecs.entity("dungeon").get([&](const DungeonData &data) { dungeonWidth = data.width; });
   // Process all actions
   ecs.defer([&]
   {
+    processShots.each([&](Action &a, const Position pos, const ShootDamage &dmg, const Team &team) {
+      if (a.action != EA_SHOOT)
+        return;
+      a.action = EA_NOP;
+      checkShots.each([&](Hitpoints &hp, const Team &enemy_team) {
+        float mageMapValue = 1e5f;
+        ecs.entity("mage_map").get([&](const DijkstraMapData &dmap) {
+          mageMapValue = dmap.map[pos.y * dungeonWidth + pos.x];
+        });
+        if (team.team != enemy_team.team && mageMapValue == 0.f)
+        // Mage still shoots at us even when runnung away
+          hp.hitpoints -= dmg.damage;
+      });
+    });
     processHeals.each([&](Action &a, Hitpoints &hp)
     {
       if (a.action != EA_HEAL_SELF)
@@ -449,6 +523,15 @@ static void process_actions(flecs::world &ecs)
     {
       pos = mpos;
       a.action = EA_NOP;
+    });
+
+    // Dungeon exploration
+    dungeonExploration.each([&](const IsPlayer &, const Position &ppos)
+    {
+      checkTiles.each([&](flecs::entity e, const BackgroundTile &, const Position &tpos, ExplorationStatus &status) {
+        if (dist_sq(ppos, tpos) < 4.f)
+          status.explored = true;
+      });
     });
   });
 
@@ -549,10 +632,11 @@ void process_turn(flecs::world &ecs)
         {
           bt.update(ecs, e, bb);
         });
-        process_dmap_followers(ecs);
+        process_dmap_followers(ecs, false);
       });
       turnIncrementer.each([](TurnCounter &tc) { tc.count++; });
     }
+    process_dmap_followers(ecs, true);
     process_actions(ecs);
 
     std::vector<float> approachMap;
@@ -570,10 +654,23 @@ void process_turn(flecs::world &ecs)
     ecs.entity("hive_map")
       .set(DijkstraMapData{hiveMap});
 
-    //ecs.entity("flee_map").add<VisualiseMap>();
-    ecs.entity("hive_follower_sum")
-      .set(DmapWeights{{{"hive_map", {1.f, 1.f}}, {"approach_map", {1.8f, 0.8f}}}})
+    std::vector<float> mageMap;
+    dmaps::gen_mage_map(ecs, mageMap);
+    ecs.entity("mage_map")
+      .set(DijkstraMapData{mageMap})
       .add<VisualiseMap>();
+
+    std::vector<float> allyMap;
+    dmaps::gen_ally_map(ecs, allyMap);
+    ecs.entity("ally_map")
+      .set(DijkstraMapData{allyMap});
+
+    std::vector<float> explorationMap;
+    dmaps::gen_exploration_map(ecs, explorationMap);
+    ecs.entity("exploration_map")
+      .set(DijkstraMapData{explorationMap});
+
+    //ecs.entity("flee_map").add<VisualiseMap>();
   }
 }
 

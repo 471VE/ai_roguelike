@@ -1,5 +1,8 @@
 # NOTE: flecs dymanic library should be copied into root directory!
 
+# Week 4 notes
+Press **E** key to automatically explore dungeon. Numbers being displayed on tiles are values of mage's Dijkstra's map.
+
 Learning materials for the course "AI for videogames" based on simple roguelike mechanics.
 * w1 - FSM
 * w2 - Behaviour Trees + blackboard
