@@ -3,6 +3,10 @@
 # Week 4 notes
 Press **E** key to automatically explore dungeon. Numbers being displayed on tiles are values of mage's Dijkstra's map.
 
+# Pathfinding notes
+Press `1` or `2` on your keyboard to switch between ARA* and A* path finding algorithms.
+
+# Description
 Learning materials for the course "AI for videogames" based on simple roguelike mechanics.
 * w1 - FSM
 * w2 - Behaviour Trees + blackboard

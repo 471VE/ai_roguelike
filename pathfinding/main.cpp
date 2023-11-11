@@ -184,17 +184,149 @@ static std::vector<Position> find_path_a_star(const char *input, size_t width, s
   return std::vector<Position>();
 }
 
-void draw_nav_data(const char *input, size_t width, size_t height, Position from, Position to, float weight)
+static std::vector<Position> open_list = {};
+static std::vector<float> g;
+std::vector<Position> prev;
+std::vector<Position> visited;
+
+static std::vector<Position> find_path_ara_star(const char *input, size_t width, size_t height, Position from, Position to, float epsilon)
+{
+  if (from.x < 0 || from.y < 0 || from.x >= int(width) || from.y >= int(height))
+    return std::vector<Position>();
+
+  auto getG = [&](Position p) -> float { return g[coord_to_idx(p.x, p.y, width)]; };
+  auto getF = [&](Position p) -> float { return getG(p) + epsilon * heuristic(p, to); };
+
+  std::vector<Position> closedList;
+  std::vector<Position> inconsList;
+
+  while (!open_list.empty())
+  {
+    size_t bestIdx = 0;
+    float bestScore = getF(open_list[0]);
+    for (size_t i = 1; i < open_list.size(); ++i)
+    {
+      float score = getF(open_list[i]);
+      if (score < bestScore)
+      {
+        bestIdx = i;
+        bestScore = score;
+      }
+    }
+    if (getF(to) > getF(open_list[bestIdx]))
+    {
+      Position curPos = open_list[bestIdx];
+      if (std::find(visited.begin(), visited.end(), curPos) == visited.end())
+        visited.push_back(curPos);
+      open_list.erase(open_list.begin() + bestIdx);
+      closedList.emplace_back(curPos);
+      auto checkNeighbour = [&](Position p)
+      {
+        // out of bounds
+        if (p.x < 0 || p.y < 0 || p.x >= int(width) || p.y >= int(height))
+          return;
+        size_t idx = coord_to_idx(p.x, p.y, width);
+        // not empty
+        if (input[idx] == '#')
+          return;
+        float edgeWeight = input[idx] == 'o' ? 10.f : 1.f;
+        float gScore = getG(curPos) + 1.f * edgeWeight; // we're exactly 1 unit away
+        if (gScore < getG(p))
+        {
+          prev[idx] = curPos;
+          g[idx] = gScore;
+          bool found = std::find(closedList.begin(), closedList.end(), p) != closedList.end();
+          if (!found)
+            if (std::find(open_list.begin(), open_list.end(), p) == open_list.end()) // not found in OPEN list
+              open_list.emplace_back(p);
+          else
+            if (std::find(inconsList.begin(), inconsList.end(), p) == inconsList.end()) // not found in INCONSISTENCY list
+              inconsList.emplace_back(p);
+        }
+      };
+      checkNeighbour({curPos.x + 1, curPos.y + 0});
+      checkNeighbour({curPos.x - 1, curPos.y + 0});
+      checkNeighbour({curPos.x + 0, curPos.y + 1});
+      checkNeighbour({curPos.x + 0, curPos.y - 1});
+    }
+    else
+    {
+      for (int i = 0; i < inconsList.size(); ++i)
+        if (std::find(open_list.begin(), open_list.end(), inconsList[i]) == open_list.end()) // not found in OPEN list
+          open_list.emplace_back(inconsList[i]);
+      inconsList.clear();
+      return reconstruct_path(prev, to, width);
+    }
+  }
+  return std::vector<Position>();
+}
+
+constexpr float EPS_START = 5.0f;
+constexpr float EPS_STEP = 0.5f;
+constexpr int FRAMES_BETWEEN_ARA_STAR_ITERATIONS = 30;
+
+static float eps = EPS_START;
+static int frames_until_next_ara_star_iteration = 0;
+static std::vector<Position> last_path;
+
+static void reset_ara_star(size_t width, size_t height, Position from)
+{
+  frames_until_next_ara_star_iteration = 0;
+  eps = EPS_START;
+  open_list = { from };
+  size_t inpSize = width * height;
+  g.clear();
+  g.resize(inpSize, std::numeric_limits<float>::max());
+  g[coord_to_idx(from.x, from.y, width)] = 0;
+  prev.clear();
+  prev.resize(inpSize, {-1,-1});
+  visited.clear();
+}
+
+enum PathFindingMode
+{
+  A_STAR,
+  ARA_STAR
+};
+
+void draw_nav_data(const char *input, size_t width, size_t height, Position from, Position to, float weight, PathFindingMode mode)
 {
   draw_nav_grid(input, width, height);
-  std::vector<Position> path = find_path_a_star(input, width, height, from, to, weight);
-  //std::vector<Position> path = find_ida_star_path(input, width, height, from, to);
-  draw_path(path);
+  switch (mode)
+  {
+    case A_STAR:
+    {
+      std::vector<Position> path = find_path_a_star(input, width, height, from, to, weight);
+      draw_path(path);
+      break;
+    }
+    
+    case ARA_STAR:
+    {
+      frames_until_next_ara_star_iteration--;
+      if (frames_until_next_ara_star_iteration < 0)
+      {
+        eps -= EPS_STEP;
+        if (eps < 1.f || open_list.empty())
+          reset_ara_star(width, height, from);
+        frames_until_next_ara_star_iteration = FRAMES_BETWEEN_ARA_STAR_ITERATIONS;
+        last_path = find_path_ara_star(input, width, height, from, to, eps);
+      }
+      for (int i = 0; i < visited.size(); i++)
+      {
+        size_t idx = coord_to_idx(visited[i].x, visited[i].y, width);
+        const Rectangle rect = {float(visited[i].x), float(visited[i].y), 1.f, 1.f};
+        DrawRectangleRec(rect, Color{uint8_t(g[idx]), uint8_t(g[idx]), 0, 100});
+      }
+      draw_path(last_path);
+      break;
+    }
+  }
 }
 
 int main(int /*argc*/, const char ** /*argv*/)
 {
-  int width = 1920;
+  int width = 1080;
   int height = 1080;
   InitWindow(width, height, "w3 AI MIPT");
 
@@ -202,8 +334,8 @@ int main(int /*argc*/, const char ** /*argv*/)
   const int scrHeight = GetMonitorHeight(0);
   if (scrWidth < width || scrHeight < height)
   {
-    width = std::min(scrWidth, width);
     height = std::min(scrHeight - 150, height);
+    width = height;
     SetWindowSize(width, height);
   }
 
@@ -220,6 +352,7 @@ int main(int /*argc*/, const char ** /*argv*/)
   Camera2D camera = { {0, 0}, {0, 0}, 0.f, 1.f };
   //camera.offset = Vector2{ width * 0.5f, height * 0.5f };
   camera.zoom = float(height) / float(dungHeight);
+  PathFindingMode mode = ARA_STAR;
 
   SetTargetFPS(60);               // Set our game to run at 60 frames-per-second
   while (!WindowShouldClose())
@@ -237,11 +370,13 @@ int main(int /*argc*/, const char ** /*argv*/)
     {
       Position &target = from;
       target = p;
+      reset_ara_star(dungWidth, dungHeight, from);
     }
     else if (IsMouseButtonPressed(1))
     {
       Position &target = to;
       target = p;
+      reset_ara_star(dungWidth, dungHeight, from);
     }
     if (IsKeyPressed(KEY_SPACE))
     {
@@ -249,6 +384,7 @@ int main(int /*argc*/, const char ** /*argv*/)
       spill_drunk_water(navGrid, dungWidth, dungHeight, 8, 10);
       from = dungeon::find_walkable_tile(navGrid, dungWidth, dungHeight);
       to = dungeon::find_walkable_tile(navGrid, dungWidth, dungHeight);
+      reset_ara_star(dungWidth, dungHeight, from);
     }
     if (IsKeyPressed(KEY_UP))
     {
@@ -260,10 +396,14 @@ int main(int /*argc*/, const char ** /*argv*/)
       weight = std::max(1.f, weight - 0.1f);
       printf("new weight %f\n", weight);
     }
+    if (IsKeyPressed(KEY_ONE))
+      mode = ARA_STAR;
+    if (IsKeyPressed(KEY_TWO))
+      mode = A_STAR;
     BeginDrawing();
       ClearBackground(BLACK);
       BeginMode2D(camera);
-        draw_nav_data(navGrid, dungWidth, dungHeight, from, to, weight);
+        draw_nav_data(navGrid, dungWidth, dungHeight, from, to, weight, mode);
       EndMode2D();
     EndDrawing();
   }

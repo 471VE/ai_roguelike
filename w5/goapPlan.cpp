@@ -82,6 +82,59 @@ float goap::make_plan(const Planner &planner, const WorldState &from, const Worl
   return 0.f;
 }
 
+static float ida_star_search(const goap::Planner &planner, std::vector<goap::PlanStep> &plan,
+                             const float g, const float bound, const goap::WorldState &to)
+{
+  goap::PlanStep current = plan.back();
+  const float f = g + heuristic(current.worldState, to);
+  if (f > bound)
+    return f;
+  if (heuristic(current.worldState, to) == 0)
+    return -f;
+  float min = FLT_MAX;
+  std::vector<size_t> transitions = find_valid_state_transitions(planner, current.worldState);
+  auto checkState = [&](size_t actId) -> float
+  {
+    goap::WorldState st = apply_action(planner, actId, current.worldState);
+    if (std::find_if(plan.begin(), plan.end(), [&](const goap::PlanStep &step) { return st == step.worldState; }) != plan.end())
+      return 0.f;
+    plan.push_back({actId, st});
+    const float score = g + get_action_cost(planner, actId);
+    const float t = ida_star_search(planner, plan, score, bound, to);
+    if (t < 0.f)
+      return t;
+    if (t < min)
+      min = t;
+    plan.pop_back();
+    return t;
+  };
+  for (size_t actId : transitions)
+  {
+    float score = checkState(actId);
+    if (score < 0.f)
+      return score;
+  }
+  return min;
+}
+
+void goap::make_ida_star_plan(const Planner &planner, const WorldState &from, const WorldState &to, std::vector<PlanStep> &plan)
+{
+  float bound = heuristic(from, to);
+  plan = {{size_t(-1), from}};
+  while (true)
+  {
+    const float t = ida_star_search(planner, plan, 0.f, bound, to);
+    if (t < 0.f || t == FLT_MAX)
+    {
+      plan.erase(plan.begin()); // to get rid of non-existent action
+      return;
+    }
+    bound = t;
+  }
+  plan.erase(plan.begin()); // to get rid of non-existent action
+  return;
+}
+
 void goap::print_plan(const Planner &planner, const WorldState &init, const std::vector<PlanStep> &plan)
 {
   printf("%15s: ", "");
@@ -111,5 +164,6 @@ void goap::print_plan(const Planner &planner, const WorldState &init, const std:
       printf("|%*d|", dlen[i], step.worldState[i]);
     printf("\n");
   }
+  printf("\n");
 }
 
