@@ -8,6 +8,24 @@
 #include "pathfinder.h"
 
 constexpr float tile_size = 64.f;
+constexpr Color PATH_COLOR = Color(255, 255, 255, 100);
+
+static void draw_path(std::vector<IVec2> path)
+{
+  if (path.empty())
+    return;
+
+  Rectangle highlight{path[0].x * tile_size, path[0].y * tile_size, tile_size, tile_size};
+  DrawRectangleRec(highlight, PATH_COLOR);
+
+  for (size_t i = 1; i < path.size(); i++)
+  {
+    if (path[i] == path[i-1])
+      continue;
+    highlight = {path[i].x * tile_size, path[i].y * tile_size, tile_size, tile_size};
+    DrawRectangleRec(highlight, PATH_COLOR);
+  }
+}
 
 static void register_roguelike_systems(flecs::world &ecs)
 {
@@ -78,6 +96,10 @@ static void register_roguelike_systems(flecs::world &ecs)
       });
     });
 
+  static IVec2 from =    {-1, -1};
+  static IVec2 to =      {-1, -1};
+  static IVec2 hovered = {-1, -1};
+
   static auto cameraQuery = ecs.query<const Camera2D>();
   ecs.system<const DungeonPortals, const DungeonData>()
     .each([&](const DungeonPortals &dp, const DungeonData &dd)
@@ -135,6 +157,30 @@ static void register_roguelike_systems(flecs::world &ecs)
                      16, WHITE);
           }
         }
+        hovered = {int(mousePosition.x / tile_size), int(mousePosition.y / tile_size)};
+        // Process click
+        if (IsMouseButtonPressed(0))
+          from = hovered;
+        else if (IsMouseButtonPressed(1))
+          to = hovered;
+
+        draw_path(find_path_hierarchical(dd, dp, from, to));
+
+        // Draw over hovered tile
+        Rectangle hoveredRect{hovered.x * tile_size, hovered.y * tile_size, tile_size, tile_size};
+        DrawRectangleLinesEx(hoveredRect, 7, BLUE);
+
+        // Draw starting and ending points
+        if (from != IVec2{-1, -1})
+        {
+          Rectangle fromRect{from.x * tile_size, from.y * tile_size, tile_size, tile_size};
+          DrawRectangleLinesEx(fromRect, 7, RED);
+        }
+        if (to != IVec2{-1, -1})
+        {
+          Rectangle toRect{to.x * tile_size, to.y * tile_size, tile_size, tile_size};
+          DrawRectangleLinesEx(toRect, 7, RED);
+        }
       });
     });
   steer::register_systems(ecs);
@@ -146,9 +192,9 @@ void init_shoot_em_up(flecs::world &ecs)
   register_roguelike_systems(ecs);
 
   ecs.entity("swordsman_tex")
-    .set(Texture2D{LoadTexture("assets/swordsman.png")});
+    .set(Texture2D{LoadTexture("w7/assets/swordsman.png")});
   ecs.entity("minotaur_tex")
-    .set(Texture2D{LoadTexture("assets/minotaur.png")});
+    .set(Texture2D{LoadTexture("w7/assets/minotaur.png")});
 
   const Position walkableTile = dungeon::find_walkable_tile(ecs);
   create_player(ecs, walkableTile * tile_size, "swordsman_tex");
@@ -157,9 +203,9 @@ void init_shoot_em_up(flecs::world &ecs)
 void init_dungeon(flecs::world &ecs, char *tiles, size_t w, size_t h)
 {
   flecs::entity wallTex = ecs.entity("wall_tex")
-    .set(Texture2D{LoadTexture("assets/wall.png")});
+    .set(Texture2D{LoadTexture("w7/assets/wall.png")});
   flecs::entity floorTex = ecs.entity("floor_tex")
-    .set(Texture2D{LoadTexture("assets/floor.png")});
+    .set(Texture2D{LoadTexture("w7/assets/floor.png")});
 
   std::vector<char> dungeonData;
   dungeonData.resize(w * h);

@@ -6,8 +6,17 @@
 #include "shootEmUp.h"
 #include "dungeonGen.h"
 
+static constexpr float ZOOM_VALUES[4] = {0.3f, 0.5f, 0.7f, 1.0f};
+static int selected_zoom = 3;
+
 static void update_camera(flecs::world &ecs)
 {
+  float mouseWheelMove = GetMouseWheelMove();
+  if (mouseWheelMove > 0)
+    selected_zoom = std::min(selected_zoom + 1, 3);
+  else if (mouseWheelMove < 0)
+    selected_zoom = std::max(selected_zoom - 1, 0);
+
   static auto cameraQuery = ecs.query<Camera2D>();
   static auto playerQuery = ecs.query<const Position, const IsPlayer>();
 
@@ -17,6 +26,7 @@ static void update_camera(flecs::world &ecs)
     {
       cam.target.x += (pos.x - cam.target.x) * 0.1f;
       cam.target.y += (pos.y - cam.target.y) * 0.1f;
+      cam.zoom = ZOOM_VALUES[selected_zoom];
     });
   });
 }

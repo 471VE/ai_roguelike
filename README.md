@@ -1,5 +1,8 @@
 # NOTE: flecs dymanic library should be copied into root directory!
 
+# Week 7 notes
+Use **LMB** and **RMB** to set end points of a route. You can zoom in and out on the map with your mouse wheel.
+
 # Week 4 notes
 Press **E** key to automatically explore dungeon. Numbers being displayed on tiles are values of mage's Dijkstra's map.
 
